@@ -1,0 +1,52 @@
+properties([
+    parameters([
+        [$class: 'ChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Select release to be deleted from NEXUS "ready" group'
+            filterLength: 1, 
+            filterable: true, 
+            name: 'ARTIFACT_ID', 
+            randomName: 'choice-parameter-5631315539223979', 
+            script: [
+                $class: 'GroovyScript', 
+                fallbackScript: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        'return[\'Something went wrong\']'
+                ], 
+                script: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: '''def xml = "https://nexus.domain.pl/nexus/service/local/lucene/search?g=release.db.ready&repositoryId=<repo_id>&p=zip".toURL().text
+    def root = new XmlParser().parseText(xml)
+    return root.data.artifact.collect {
+    "${it.artifactId.text()}"
+    }'''
+                ]
+            ]
+        ]
+
+    ])
+])
+
+pipeline {
+    agent {
+        node {
+            label '<node_name>'
+        }
+    }
+    environment {
+        REPO_ID='<repo_id>'
+    }
+
+    stages {
+
+   stage(delete_release) {
+            steps{
+                sh 'curl --request DELETE --user "deployment:<pass>" https://nexus.domain.pl/nexus/content/repositories/${REPO_ID}/release/db/ready/${ARTIFACT_ID}'
+                
+            }
+        }
+    }
+}

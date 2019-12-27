@@ -1,0 +1,88 @@
+properties([
+    parameters([
+        [$class: 'ChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Select the Env Name from the Dropdown List', 
+            filterLength: 1, 
+            filterable: true, 
+            name: 'ARTIFACT_ID', 
+            randomName: 'choice-parameter-5631315539613979', 
+            script: [
+                $class: 'GroovyScript', 
+                fallbackScript: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        'return[\'Could not get Env\']'
+                ], 
+                script: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: '''def xml = "https://nexus.domain.pl/nexus/service/local/lucene/search?g=release.db.working&repositoryId=<repo_id>&p=zip".toURL().text
+    def root = new XmlParser().parseText(xml)
+    return root.data.artifact.collect {
+    "${it.artifactId.text()}"
+    }'''
+                ]
+            ]
+        ],
+        [$class: 'CascadeChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Select the Server from the Dropdown List', 
+            filterLength: 1, 
+            filterable: true, 
+            name: 'VERSION_ID', 
+            randomName: 'choice-parameter-5631316656178619', 
+            referencedParameters: 'ARTIFACT_ID', 
+            script: [
+                $class: 'GroovyScript', 
+                fallbackScript: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        'return[\'Could not get Env\']'
+                ], 
+                script: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        ''' def xml = "https://nexus.domain.pl/nexus/service/local/lucene/search?g=release.db.working&repositoryId=<repo_id>&p=zip&a=${ARTIFACT_ID}".toURL().text
+    def root = new XmlParser().parseText(xml)
+    return root.data.artifact.collect {element -> element.version.text()} '''
+                ]
+            ]
+        ]
+    ])
+])
+
+pipeline {
+    agent {
+        node {
+            label '<node_name>'
+        }
+    }
+    environment {
+        REPO_ID='<repo_id>'
+    }
+
+    stages {
+        stage(Download_release) {
+            steps{
+                echo "Downloading release"
+                echo "$ARTIFACT_ID"
+                echo "$VERSION_ID"
+                deleteDir()
+                sh 'curl -sS "https://nexus.domain.pl/nexus/service/local/artifact/maven/redirect?g=release.db.working&a=${ARTIFACT_ID}&v=${VERSION_ID}&r=${REPO_ID}&p=zip&" -o ${ARTIFACT_ID}.zip  -v -R --location-trusted --fail'
+            }
+        }
+
+        stage(Upload_release) {
+            steps{
+                sh 'ls -la $WORKSPACE'
+                echo "we will put artifacts into nexus here"
+                nexusArtifactUploader artifacts: [[artifactId: "${ARTIFACT_ID}", classifier: '', file: "${ARTIFACT_ID}.zip", type: 'zip']], credentialsId: 'nexus', groupId: 'release.db.ready', nexusUrl: 'bob:8083/nexus', nexusVersion: 'nexus2', protocol: 'http', repository: "${REPO_ID}", version: "${VERSION_ID}"
+                sh 'curl --request DELETE --user "deployment:sexus" https://nexus.domain.pl/nexus/content/repositories/${REPO_ID}/release/db/working/${ARTIFACT_ID}'
+            }
+        }
+    }
+}

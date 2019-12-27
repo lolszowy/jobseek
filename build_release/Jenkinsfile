@@ -1,0 +1,111 @@
+def branch() {
+    if (env.gitlabBranch) {
+        def values = env.gitlabBranch.split('/')
+        return values[1]
+    } else {
+        return params.BRANCH
+    }
+}
+
+
+pipeline {
+    agent {
+        node {
+            label '<node_name>'
+        }
+    }
+    environment {
+        RELEASE_BRANCH = 'release'
+        MASTER_BRANCH = 'master'
+        GIT_REPO = '<url_to_project_git_repo>'
+        BUILDER_CREDENTIAL_ID = '<credential_id>'
+        GENERATOR_REPO = '<url_to_generator_git_repo>'
+        BRANCH = branch()
+
+    }
+    tools {
+        jdk 'openjdk-8'
+    }
+    options {
+        skipDefaultCheckout true
+    }
+    parameters {
+        gitParameter branchFilter: 'origin.*/release.*/(.*)', defaultValue: 'master', name: 'BRANCH', type: 'PT_BRANCH', quickFilterEnabled: true, useRepository: '<url_to_git_repo>'
+        string(name: 'VERSION', defaultValue: '1.0.0', description: 'Enter proper release version')
+    }
+    stages {
+        
+        stage('Delete old workspaces') {
+            steps {
+                cleanWs deleteDirs: true, patterns: [[pattern: 'tiapatchgenerator/**', type: 'EXCLUDE'], [pattern: 'projekt/**', type: 'EXCLUDE']]
+            }
+        }
+        stage('Pull project GIT repository') {
+            steps {
+                dir('projekt') {
+                    git credentialsId: "$BUILDER_CREDENTIAL_ID", url: "$GIT_REPO"
+                    git branch: "$MASTER_BRANCH", credentialsId: "$BUILDER_CREDENTIAL_ID", url: "$GIT_REPO"
+                }
+
+            }
+        }
+        stage('Pull JenkinsJob GIT repository') {
+            steps {
+                dir('tiapatchgenerator') {
+                    git credentialsId: "$BUILDER_CREDENTIAL_ID", url: "$GENERATOR_REPO"
+                    git branch: 'master', credentialsId: "$BUILDER_CREDENTIAL_ID", url: "$GENERATOR_REPO"
+                }
+            }
+        }
+
+        stage('GIT checkout on release branch') {
+            steps {
+                dir('projekt') {
+                    echo "after2 ${env.BRANCH}"
+                    git branch: "$RELEASE_BRANCH/$BRANCH", credentialsId: "$BUILDER_CREDENTIAL_ID", url: "$GIT_REPO"
+                }
+            }
+        }
+
+        stage('build') {
+
+            steps {
+                script {
+                    build()
+                }
+            }
+        }
+
+        stage('Nexus2') {
+            steps {
+                echo "we will put artifacts into nexus here"
+                nexusArtifactUploader artifacts: [[artifactId: '${BRANCH}', classifier: '', file: '${BRANCH}.zip', type: 'zip']], credentialsId: 'nexus', groupId: '<client_short_name>.release', nexusUrl: 'hostname:port/nexus', nexusVersion: 'nexus2', protocol: 'http', repository: 'majster_repo_id', version: "${VERSION}"
+
+            }
+        }
+
+        // stage('delete_artifacts') {
+
+        //     steps {
+        //         echo "we will delete artifacts here"
+        //         sh 'rm -rf "${WORKSPACE}/${BRANCH}.zip"'
+
+        //     }
+        // }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: '**/*.zip', onlyIfSuccessful: true
+
+        }
+        
+    }
+
+ 
+}
+
+void build() {
+    sh script: 'java -jar tiapatchgenerator/build_release/tiapatchgenerator.jar -r "${WORKSPACE}/projekt" -s "${MASTER_BRANCH}" -u "${RELEASE_BRANCH}/${BRANCH}" -n "${BRANCH}" -c "${WORKSPACE}/tiapatchgenerator/<client_short_name>/release_generator/config.json"'
+    sh script: 'find . -iname *.zip | xargs -I{} mv {} "${WORKSPACE}/${BRANCH}.zip"'
+}

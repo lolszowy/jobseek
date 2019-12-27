@@ -1,0 +1,161 @@
+def template_dir() {
+    TEMP_DIR= sh(script: "find . -type d -iname 'template'", returnStdout: true).trim()
+    if (TEMP_DIR) {
+        echo 'TRUE'
+        echo "TEMP_DIR: ${env.TEMP_DIR}"
+        return TEMP_DIR
+    }
+    else {
+        echo 'FALSE'
+    }
+}
+ 
+
+properties([
+    parameters([
+        [$class: 'ChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Select the Env Name from the Dropdown List', 
+            filterLength: 1, 
+            filterable: true, 
+            name: 'DATABASE_SID', 
+            randomName: 'choice-parameter-5631314439613978', 
+            script: [
+                $class: 'GroovyScript', 
+                fallbackScript: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        'return[\'Could not get Env\']'
+                ], 
+                script: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: '''def MyList = "ssh -q oracle@<node_name> ls /opt/data/oradata/ | grep -v _clean_db".execute()
+    java.util.List cmdResultArray = MyList.text.split("\\n");
+    return cmdResultArray'''
+                ]
+            ]
+        ], 
+        [$class: 'ChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Select the Env Name from the Dropdown List', 
+            filterLength: 1, 
+            filterable: true, 
+            name: 'ARTIFACT_ID', 
+            randomName: 'choice-parameter-5631314439613979', 
+            script: [
+                $class: 'GroovyScript', 
+                fallbackScript: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        'return[\'Could not get Env\']'
+                ], 
+                script: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: '''def xml = "https://nexus.domain.pl/nexus/service/local/lucene/search?g=release.db&repositoryId=<repo_id>&p=zip".toURL().text
+    def root = new XmlParser().parseText(xml)
+    return root.data.artifact.collect {
+    "${it.artifactId.text()}"
+    }'''
+                ]
+            ]
+        ],
+        [$class: 'CascadeChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Select the Server from the Dropdown List', 
+            filterLength: 1, 
+            filterable: true, 
+            name: 'VERSION_ID', 
+            randomName: 'choice-parameter-5631314456178619', 
+            referencedParameters: 'ARTIFACT_ID', 
+            script: [
+                $class: 'GroovyScript', 
+                fallbackScript: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        'return[\'Could not get Environment from Env Param\']'
+                ], 
+                script: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        ''' def xml = "https://nexus.domain>.pl/nexus/service/local/lucene/search?g=release.db&repositoryId=<repo_id>&p=zip&a=${ARTIFACT_ID}".toURL().text
+    def root = new XmlParser().parseText(xml)
+    return root.data.artifact.collect {element -> element.version.text()} '''
+                ]
+            ]
+        ]
+    ])
+])
+
+pipeline {
+    agent {
+        node {
+            label '<node_name>'
+        }
+    }
+    environment {
+        DB_ENVS= '/home/oracle/bin/oraenv_11R2.0.1'
+        TIA_PASS = '<password>'
+        TSFA_DIR='/opt/data/tsfa'
+        REPO_ID='<repo_id>'
+        DATABASE_SID_LOWER = DATABASE_SID.toLowerCase();
+    }
+
+    stages {
+        stage('1. delete workspace') {
+            steps {
+                deleteDir()
+                buildName "#${BUILD_NUMBER} ${DATABASE_SID} ${ARTIFACT_ID}"
+            }
+        }
+        stage ('Downloading release') {
+            steps {
+                echo "Downloading release"
+                sh 'curl -sS "https://nexus.domain.pl/nexus/service/local/artifact/maven/redirect?g=release.db&a=${ARTIFACT_ID}&v=${VERSION_ID}&r=${REPO_ID}&p=zip&" -o ${ARTIFACT_ID}.zip  -v -R --location-trusted --fail'
+            }         
+        }
+        stage('Install DB release') {
+            steps {
+                echo "Install DB release"
+                echo "${params.DATABASE_SID}"
+                echo "${params.ARTIFACT_ID}"
+                echo "${params.VERSION_ID}"
+                sh '''
+                    RELEASE_FILE=`find . -iname "*.zip"`
+                    unzip -o ${RELEASE_FILE} -d release_to_be_installed/
+                    INSTALL_FILE=`find . -iname "install.sql" | sort | grep -m1 .`
+                    INSTALL_PATH=`dirname ${INSTALL_FILE}`
+                    cd ${INSTALL_PATH}
+                    source "${DB_ENVS}"
+                    export ORACLE_SID=${DATABASE_SID_LOWER}
+                    echo -e "@install.sql" | sqlplus tia/"${TIA_PASS}" '''
+            }
+        }
+
+        stage('Put templates') {
+            steps {
+                build job: 'KM6-install_release-copy_templates', 
+                    parameters: [
+                        [$class: 'StringParameterValue', name: 'UPSTREAM_JOB_NAME', value: "${JOB_NAME}"],  
+                        [$class: 'StringParameterValue', name: 'DATABASE_SID', value: "${DATABASE_SID_LOWER}"]     
+                                     
+                    ]
+            }
+        }
+        // stage('Compile Forms&Reports') {
+        //     steps {
+        //         // when {
+        //         //     expression { return env.GITLAB_BRANCH != 'null' }
+        //         // }
+        //         echo "Compile Forms&Reports"
+        //     }
+        // }
+
+    }
+
+}

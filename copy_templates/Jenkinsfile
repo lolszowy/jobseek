@@ -1,0 +1,38 @@
+def temp_dir() {
+    TEMP_DIR= sh(script: "find ../${params.UPSTREAM_JOB_NAME}/ -type d -iname 'template'", returnStdout: true).trim()
+    if (TEMP_DIR) {
+        return TEMP_DIR
+    }
+}
+
+pipeline {
+    agent {
+        node {
+            label '<node_name>'
+        }
+    }
+        
+    
+    parameters {
+        string(name: 'UPSTREAM_JOB_NAME', description: 'What is the name of upstream Job')
+        string(name: 'DATABASE_SID', description: 'What is your database SID?')
+    }
+    environment {
+        TEMPLATE_DIRECTORY = temp_dir()
+        TEMPLATE_TSFA_DIR = "/opt/data/tiatsfa/${params.DATABASE_SID}/template/"
+    }
+    stages {        
+        stage('Are there any templates?') {
+            when { expression { return env.TEMPLATE_DIRECTORY != 'null' } }
+            steps {
+                echo "DATABASE_SID: ${params.DATABASE_SID}"
+                echo "TEMPLATE_TSFA_DIR: ${env.TEMPLATE_TSFA_DIR}"
+                sh script: '''
+                ls -la ${TEMPLATE_DIRECTORY}
+                ls -la "${TEMPLATE_TSFA_DIR}"
+                cp -rv ${TEMPLATE_DIRECTORY}/* ${TEMPLATE_TSFA_DIR}/ '''
+            }
+        }
+    }
+}
+

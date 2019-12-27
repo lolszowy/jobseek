@@ -1,0 +1,128 @@
+properties([
+    parameters([
+        [$class: 'ChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Select the Env Name from the Dropdown List', 
+            filterLength: 1, 
+            filterable: true, 
+            name: 'DATABASE_SID', 
+            randomName: 'choice-parameter-5631314439613978', 
+            script: [
+                $class: 'GroovyScript', 
+                fallbackScript: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        'return[\'Could not get Env\']'
+                ], 
+                script: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: '''
+                        return[
+                            '<database_sid>',
+                        ]'''
+                ]
+            ]
+        ], 
+        [$class: 'ChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Select the Env Name from the Dropdown List', 
+            filterLength: 1, 
+            filterable: true, 
+            name: 'ARTIFACT_ID', 
+            randomName: 'choice-parameter-5631314439613979', 
+            script: [
+                $class: 'GroovyScript', 
+                fallbackScript: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        'return[\'Could not get Env\']'
+                ], 
+                script: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: '''def xml = "https://nexus.domain.pl/nexus/service/local/lucene/search?g=release.db&repositoryId=<repo_id>&p=zip".toURL().text
+    def root = new XmlParser().parseText(xml)
+    return root.data.artifact.collect {
+    "${it.artifactId.text()}"
+    }'''
+                ]
+            ]
+        ],
+        [$class: 'CascadeChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Select the Server from the Dropdown List', 
+            filterLength: 1, 
+            filterable: true, 
+            name: 'VERSION_ID', 
+            randomName: 'choice-parameter-5631314456178619', 
+            referencedParameters: 'ARTIFACT_ID', 
+            script: [
+                $class: 'GroovyScript', 
+                fallbackScript: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        'return[\'Could not get Environment from Env Param\']'
+                ], 
+                script: [
+                    classpath: [], 
+                    sandbox: false, 
+                    script: 
+                        ''' def xml = "https://nexus.domain.pl/nexus/service/local/lucene/search?g=release.db&repositoryId=<repo_id>&p=zip&a=${ARTIFACT_ID}".toURL().text
+    def root = new XmlParser().parseText(xml)
+    return root.data.artifact.collect {element -> element.version.text()} '''
+                ]
+            ]
+        ]
+    ])
+])
+
+pipeline {
+    agent {
+        node {
+            label '<node_name>'
+        }
+    }
+    tools {
+        jdk 'openjdk-11'
+    }
+
+    stages {
+        stage ('Clean workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+        stage('Download_release') {
+            steps {
+                powershell '''
+                    curl https://nexus.domain.pl/nexus/service/local/artifact/maven/redirect?g=release.db"&"a=${ENV:ARTIFACT_ID}"&"v=${ENV:VERSION_ID}"&"r=<repo_id>"&"p=zip"&" -o $ENV:ARTIFACT_ID'.zip'
+                    unzip.exe $ENV:ARTIFACT_ID
+                    ls
+                '''
+            }
+        }
+        stage('Install_release') {
+            steps {
+                powershell '''
+                    $TIA_PW = 'tia'
+                    $ENV:ORACLE_HOME = 'C:\\Oracle\\product\\11.2.0\\dbhome_1'
+                    $ENV:ORACLE_SID= $ENV:DATABASE_SID.tolower()
+                    $ENV:PATH = "$env:PATH ; $env:ORACLE_HOME\\bin"
+                    $ENV:LC_ALL='en_US.UTF-8'
+                    $ENV:NLS_LANG='AMERICAN_AMERICA.AL32UTF8'
+
+                    $INST_PATH = Get-ChildItem -Path $WORKSPACE -File -Include *install.sql* -recurse -Name
+                    $INST_DIR = Split-Path -Path $INST_PATH
+
+                    cd $INST_DIR
+                    echo '@install.sql' | sqlplus "tia/$TIA_PW"
+                    echo $?
+                '''
+            }
+        }
+    }
+}
