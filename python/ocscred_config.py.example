@@ -1,3 +1,3 @@
 
-ocs_cred = {'user': '<username>', 'passwd': '<password>', 'host' : 'https://wij.ncdc.pl'}
-google_conf = {'GoogleDOC_name': 'SoftwareWhiteList-spreadsheet','scope': 'https://www.googleapis.com/auth/drive', 'GSCN': 'NAME','GoogleAPI_cred': 'GoogleAPI/whitelist-03d2429e696c.json'}
+ocs_cred = {'user': '<username>', 'passwd': '<password>', 'host' : 'https://hostname.pl'}
+google_conf = {'GoogleDOC_name': 'SoftwareWhiteList-spreadsheet','scope': 'https://www.googleapis.com/auth/drive', 'GSCN': 'NAME','GoogleAPI_cred': 'GoogleAPI/whitelist.json'}
